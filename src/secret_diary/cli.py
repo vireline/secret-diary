@@ -10,6 +10,7 @@ from rich.table import Table
 
 from .store import connect
 from .crypto import new_salt, fernet_from_password
+from cryptography.fernet import InvalidToken
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 console = Console()
@@ -25,6 +26,13 @@ def _get_salt(con) -> bytes:
     if not row:
         raise typer.BadParameter("Not initialized. Run: secret-diary init")
     return row[0]
+
+
+def _safe_decrypt(f, blob: bytes) -> str:
+    try:
+        return f.decrypt(blob).decode("utf-8")
+    except InvalidToken:
+        raise typer.BadParameter("Wrong master password (or corrupted data).")
 
 def _get_fernet(con):
     password = getpass.getpass("Master password: ")
@@ -80,8 +88,8 @@ def list():
     table.add_column("Tags")
     table.add_column("Created")
     for note_id, enc_title, enc_tags, created_at in rows:
-        title = f.decrypt(enc_title).decode("utf-8")
-        tags = f.decrypt(enc_tags).decode("utf-8")
+        title = _safe_decrypt(f, enc_title)
+        tags = _safe_decrypt(f, enc_tags)
         table.add_row(str(note_id), title, tags, created_at)
     console.print(table)
 
@@ -95,9 +103,9 @@ def read(note_id: int):
     if not row:
         raise typer.BadParameter("No such note.")
     enc_title, enc_tags, enc_body, created_at = row
-    title = f.decrypt(enc_title).decode("utf-8")
-    tags = f.decrypt(enc_tags).decode("utf-8")
-    body = f.decrypt(enc_body).decode("utf-8")
+    title = _safe_decrypt(f, enc_title)
+    tags = _safe_decrypt(f, enc_tags)
+    body = _safe_decrypt(f, enc_body)
 
     console.rule(f"[bold]{title}[/bold]")
     if tags.strip():
@@ -115,8 +123,8 @@ def search(query: str):
     hits = []
     q = query.lower()
     for note_id, enc_title, enc_body in rows:
-        title = f.decrypt(enc_title).decode("utf-8")
-        body = f.decrypt(enc_body).decode("utf-8")
+        title = _safe_decrypt(f, enc_title)
+        body = _safe_decrypt(f, enc_body)
         if q in title.lower() or q in body.lower():
             hits.append((note_id, title))
 
